@@ -1,0 +1,304 @@
+import React, { useState } from 'react';
+import { Download, Plus, Trash2, DollarSign } from 'lucide-react';
+import * as XLSX from 'xlsx';
+
+const LatePaymentCalculator = () => {
+  const [invoices, setInvoices] = useState([{
+    id: 1,
+    clientName: '',
+    invoiceNumber: '',
+    invoiceDate: '',
+    paymentTerms: '14 days',
+    invoiceAmount: '',
+    daysDelinquent: ''
+  }]);
+
+  const paymentTermsOptions = [
+    'Same Day',
+    '10 days',
+    '14 days',
+    '30 days',
+    '45 days',
+    '60 days'
+  ];
+
+  const calculateInterest = (principal, daysDelinquent) => {
+    if (!principal || !daysDelinquent || daysDelinquent <= 0) return 0;
+    const monthlyRate = 0.015;
+    const months = daysDelinquent / 30;
+    const interest = principal * (Math.pow(1 + monthlyRate, months) - 1);
+    return Math.round(interest * 100) / 100;
+  };
+
+  const calculateLateFee = (daysDelinquent) => {
+    return daysDelinquent > 45 ? 75 : 0;
+  };
+
+  const calculateTotal = (invoice) => {
+    const principal = parseFloat(invoice.invoiceAmount) || 0;
+    const days = parseInt(invoice.daysDelinquent) || 0;
+    const interest = calculateInterest(principal, days);
+    const lateFee = calculateLateFee(days);
+    return principal + interest + lateFee;
+  };
+
+  const addInvoice = () => {
+    setInvoices([...invoices, {
+      id: Date.now(),
+      clientName: '',
+      invoiceNumber: '',
+      invoiceDate: '',
+      paymentTerms: '14 days',
+      invoiceAmount: '',
+      daysDelinquent: ''
+    }]);
+  };
+
+  const removeInvoice = (id) => {
+    if (invoices.length > 1) {
+      setInvoices(invoices.filter(inv => inv.id !== id));
+    }
+  };
+
+  const updateInvoice = (id, field, value) => {
+    setInvoices(invoices.map(inv => 
+      inv.id === id ? { ...inv, [field]: value } : inv
+    ));
+  };
+
+  const generateExcel = () => {
+    const data = invoices.map(inv => {
+      const principal = parseFloat(inv.invoiceAmount) || 0;
+      const days = parseInt(inv.daysDelinquent) || 0;
+      const interest = calculateInterest(principal, days);
+      const lateFee = calculateLateFee(days);
+      const total = principal + interest + lateFee;
+
+      return {
+        'Client Name': inv.clientName,
+        'Invoice Number': inv.invoiceNumber,
+        'Invoice Date': inv.invoiceDate,
+        'Payment Terms': inv.paymentTerms,
+        'Invoice Amount': principal,
+        'Days Delinquent': days,
+        'Interest Accrued': interest,
+        'Late Fee': lateFee,
+        'Total Amount Due': total
+      };
+    });
+
+    const ws = XLSX.utils.json_to_sheet(data);
+    
+    // Set column widths
+    ws['!cols'] = [
+      { wch: 20 }, // Client Name
+      { wch: 15 }, // Invoice Number
+      { wch: 12 }, // Invoice Date
+      { wch: 15 }, // Payment Terms
+      { wch: 15 }, // Invoice Amount
+      { wch: 15 }, // Days Delinquent
+      { wch: 15 }, // Interest Accrued
+      { wch: 10 }, // Late Fee
+      { wch: 18 }  // Total Amount Due
+    ];
+
+    // Format currency columns
+    const range = XLSX.utils.decode_range(ws['!ref']);
+    for (let R = range.s.r + 1; R <= range.e.r; ++R) {
+      // Invoice Amount (column E)
+      const cellE = XLSX.utils.encode_cell({ r: R, c: 4 });
+      if (ws[cellE]) ws[cellE].z = '$#,##0.00';
+      
+      // Interest Accrued (column G)
+      const cellG = XLSX.utils.encode_cell({ r: R, c: 6 });
+      if (ws[cellG]) ws[cellG].z = '$#,##0.00';
+      
+      // Late Fee (column H)
+      const cellH = XLSX.utils.encode_cell({ r: R, c: 7 });
+      if (ws[cellH]) ws[cellH].z = '$#,##0.00';
+      
+      // Total Amount Due (column I)
+      const cellI = XLSX.utils.encode_cell({ r: R, c: 8 });
+      if (ws[cellI]) ws[cellI].z = '$#,##0.00';
+    }
+
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Late Payment Charges');
+    
+    const timestamp = new Date().toISOString().split('T')[0];
+    XLSX.writeFile(wb, `Late_Payment_Charges_${timestamp}.xlsx`);
+  };
+
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 p-6">
+      <div className="max-w-7xl mx-auto">
+        <div className="bg-white rounded-lg shadow-lg p-8 mb-6">
+          <div className="flex items-center justify-between mb-6">
+            <div>
+              <h1 className="text-3xl font-bold text-slate-800 flex items-center gap-2">
+                <DollarSign className="text-blue-600" />
+                Late Payment Calculator
+              </h1>
+              <p className="text-slate-600 mt-2">Calculate compounded interest and late fees for delinquent invoices</p>
+            </div>
+            <button
+              onClick={generateExcel}
+              className="flex items-center gap-2 bg-blue-600 text-white px-6 py-3 rounded-lg hover:bg-blue-700 transition-colors font-semibold shadow-md"
+            >
+              <Download size={20} />
+              Export to Excel
+            </button>
+          </div>
+
+          <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
+            <h3 className="font-semibold text-blue-900 mb-2">Calculation Rules:</h3>
+            <ul className="text-sm text-blue-800 space-y-1">
+              <li>• Interest: 1.5% per month (18% annually), compounded monthly</li>
+              <li>• Formula: Principal × (1.015)^(Days/30) - Principal</li>
+              <li>• Late Fee: $75 one-time charge if Days Delinquent &gt; 45</li>
+            </ul>
+          </div>
+
+          {invoices.map((invoice, index) => {
+            const principal = parseFloat(invoice.invoiceAmount) || 0;
+            const days = parseInt(invoice.daysDelinquent) || 0;
+            const interest = calculateInterest(principal, days);
+            const lateFee = calculateLateFee(days);
+            const total = calculateTotal(invoice);
+
+            return (
+              <div key={invoice.id} className="bg-slate-50 rounded-lg p-6 mb-4 border border-slate-200">
+                <div className="flex justify-between items-center mb-4">
+                  <h3 className="font-semibold text-slate-700">Invoice #{index + 1}</h3>
+                  {invoices.length > 1 && (
+                    <button
+                      onClick={() => removeInvoice(invoice.id)}
+                      className="text-red-600 hover:text-red-700 p-2 hover:bg-red-50 rounded transition-colors"
+                    >
+                      <Trash2 size={18} />
+                    </button>
+                  )}
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-4">
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-1">Client Name</label>
+                    <input
+                      type="text"
+                      value={invoice.clientName}
+                      onChange={(e) => updateInvoice(invoice.id, 'clientName', e.target.value)}
+                      className="w-full px-3 py-2 border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      placeholder="ABC Company"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-1">Invoice Number</label>
+                    <input
+                      type="text"
+                      value={invoice.invoiceNumber}
+                      onChange={(e) => updateInvoice(invoice.id, 'invoiceNumber', e.target.value)}
+                      className="w-full px-3 py-2 border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      placeholder="INV-001"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-1">Invoice Date</label>
+                    <input
+                      type="date"
+                      value={invoice.invoiceDate}
+                      onChange={(e) => updateInvoice(invoice.id, 'invoiceDate', e.target.value)}
+                      className="w-full px-3 py-2 border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-1">Payment Terms</label>
+                    <select
+                      value={invoice.paymentTerms}
+                      onChange={(e) => updateInvoice(invoice.id, 'paymentTerms', e.target.value)}
+                      className="w-full px-3 py-2 border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    >
+                      {paymentTermsOptions.map(term => (
+                        <option key={term} value={term}>{term}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-1">Invoice Amount ($)</label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      value={invoice.invoiceAmount}
+                      onChange={(e) => updateInvoice(invoice.id, 'invoiceAmount', e.target.value)}
+                      className="w-full px-3 py-2 border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      placeholder="1000.00"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-1">Days Delinquent</label>
+                    <input
+                      type="number"
+                      value={invoice.daysDelinquent}
+                      onChange={(e) => updateInvoice(invoice.id, 'daysDelinquent', e.target.value)}
+                      className="w-full px-3 py-2 border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      placeholder="30"
+                    />
+                  </div>
+                </div>
+
+                {principal > 0 && days > 0 && (
+                  <div className="bg-white rounded-lg p-4 border border-slate-200">
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                      <div>
+                        <p className="text-slate-600 font-medium">Interest Accrued</p>
+                        <p className="text-lg font-bold text-slate-800">${interest.toFixed(2)}</p>
+                      </div>
+                      <div>
+                        <p className="text-slate-600 font-medium">Late Fee</p>
+                        <p className="text-lg font-bold text-slate-800">${lateFee.toFixed(2)}</p>
+                      </div>
+                      <div>
+                        <p className="text-slate-600 font-medium">Months Delinquent</p>
+                        <p className="text-lg font-bold text-slate-800">{(days / 30).toFixed(2)}</p>
+                      </div>
+                      <div>
+                        <p className="text-slate-600 font-medium">Total Amount Due</p>
+                        <p className="text-xl font-bold text-blue-600">${total.toFixed(2)}</p>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+
+          <button
+            onClick={addInvoice}
+            className="flex items-center gap-2 text-blue-600 hover:text-blue-700 font-medium px-4 py-2 hover:bg-blue-50 rounded transition-colors"
+          >
+            <Plus size={20} />
+            Add Another Invoice
+          </button>
+        </div>
+
+        <div className="bg-white rounded-lg shadow-lg p-6">
+          <h2 className="text-xl font-bold text-slate-800 mb-4">How to Use</h2>
+          <ol className="space-y-2 text-slate-700">
+            <li><strong>1.</strong> Enter client and invoice details for each delinquent invoice</li>
+            <li><strong>2.</strong> Select the original payment terms (e.g., "14 days")</li>
+            <li><strong>3.</strong> Enter only the days past the allowed payment terms in "Days Delinquent"</li>
+            <li><strong>4.</strong> Review the calculated interest, late fee, and total amount due</li>
+            <li><strong>5.</strong> Click "Export to Excel" to generate a downloadable spreadsheet</li>
+            <li><strong>6.</strong> Use the exported file to draft additional invoices for your AR team</li>
+          </ol>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+export default LatePaymentCalculator;
